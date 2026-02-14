@@ -1,0 +1,9 @@
+# Ignore all files
+*
+
+# Except these
+!.gitignore
+!Script-1.sql
+!northwind2016-postgres.sql
+!*.pdf
+!README.md
