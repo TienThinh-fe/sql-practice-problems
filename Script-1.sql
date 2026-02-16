@@ -190,3 +190,71 @@ where o.order_id is null
 --    from "order" o 
 --    where o.employee_id = 4
 --)
+
+-- advanced problems
+
+--q32
+-- WHERE vs HAVING:
+-- WHERE filters rows BEFORE grouping (e.g., only 2016 orders)
+-- HAVING filters groups AFTER aggregation (e.g., only totals >= 10000)
+-- Flow: FROM → JOIN → WHERE → GROUP BY → HAVING → SELECT → ORDER BY
+select c.customer_id, c.company_name, o.order_id, round(sum(od.quantity * od.unit_price), 2) as "TotalOrderAmount"
+from customer c
+join "order" o on o.customer_id = c.customer_id 
+join order_detail od on o.order_id = od.order_id 
+where extract(year from o.order_date) = 2016 -- filters rows before grouping
+group by c.customer_id, o.order_id, c.company_name  
+having sum(od.quantity * od.unit_price) >= 10000 -- filters aggregated results (can't use alias here)
+order by "TotalOrderAmount" desc
+
+--q33
+select c.customer_id, c.company_name, round(sum(od.quantity * od.unit_price), 2) as "TotalAmount"
+from customer c
+join "order" o on o.customer_id = c.customer_id 
+join order_detail od on o.order_id = od.order_id 
+where extract(year from o.order_date) = 2016
+group by c.customer_id, c.company_name  
+having sum(od.quantity * od.unit_price) >= 15000
+order by "TotalAmount" desc
+
+--q34
+select 
+	c.customer_id, 
+	c.company_name, 
+	sum(od.quantity * od.unit_price)  as "TotalsWithoutDiscount", 
+	sum(od.quantity * od.unit_price * (1 - od.discount))  as "TotalsWithDiscount"
+from customer c
+join "order" o on o.customer_id = c.customer_id 
+join order_detail od on o.order_id = od.order_id 
+where extract(year from o.order_date) = 2016
+group by c.customer_id, c.company_name  
+having sum(od.quantity * od.unit_price * (1 - od.discount)) >= 10000
+order by "TotalsWithDiscount" desc
+
+--q35
+--select o.employee_id, o.order_id , o.order_date 
+--from "order" o 
+--where date_part('day', o.order_date) = date_part('day', (date_trunc('month', o.order_date) + interval '1 month - 1 day'))
+
+select o.employee_id, o.order_id, o.order_date 
+from "order" o 
+where date_trunc('month', o.order_date) != date_trunc('month', o.order_date + interval '1 day')
+order by o.employee_id, o.order_id
+
+--q36
+select od.order_id, count(*) as "TotalOrderDetails"
+from order_detail od  
+group by od.order_id 
+order by "TotalOrderDetails" desc
+limit 10
+-- https://www.postgresql.org/docs/current/sql-select.html#SQL-LIMIT
+
+--q37
+select o.order_id 
+from "order" o 
+order by random() 
+limit (select round(count(*) * 0.02) from "order")
+-- LIMIT requires a constant value, not an aggregate
+-- => we cannot do it like this: limit round(count(*) * 0.02)
+
+--q38
