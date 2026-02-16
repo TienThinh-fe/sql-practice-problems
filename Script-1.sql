@@ -258,3 +258,14 @@ limit (select round(count(*) * 0.02) from "order")
 -- => we cannot do it like this: limit round(count(*) * 0.02)
 
 --q38
+select od.order_id
+from order_detail od
+inner join order_detail od2 on od.order_id = od2.order_id 
+where od.product_id < od2.product_id and od.quantity = od2.quantity and od.quantity >= 60
+
+ select od.order_id
+ from order_detail od
+ where od.quantity >= 60
+ group by od.order_id, od.quantity
+ having count(*) > 1  -- more than 1 product with same quantity
+ order by od.order_id
