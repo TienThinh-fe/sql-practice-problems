@@ -263,9 +263,124 @@ from order_detail od
 inner join order_detail od2 on od.order_id = od2.order_id 
 where od.product_id < od2.product_id and od.quantity = od2.quantity and od.quantity >= 60
 
- select od.order_id
- from order_detail od
- where od.quantity >= 60
- group by od.order_id, od.quantity
- having count(*) > 1  -- more than 1 product with same quantity
- order by od.order_id
+-- select od.order_id
+-- from order_detail od
+-- where od.quantity >= 60
+-- group by od.order_id, od.quantity
+-- having count(*) > 1  -- more than 1 product with same quantity
+-- order by od.order_id
+
+--q39
+select od.order_id, od.product_id, od.unit_price, od.quantity, od.discount 
+from order_detail od
+where od.order_id in (
+    -- reuse q38 logic to find qualifying orders
+	select od.order_id
+	from order_detail od
+	inner join order_detail od2 on od.order_id = od2.order_id 
+	where od.product_id < od2.product_id and od.quantity = od2.quantity and od.quantity >= 60
+)
+order by od.order_id, od.product_id
+
+-- Using Common Table Expression (CTE)
+with potential_problem_orders as (
+    select order_id
+    from order_detail
+    where quantity >= 60
+    group by order_id, quantity
+    having count(*) > 1
+)
+select od.order_id, od.product_id, od.unit_price, od.quantity, od.discount 
+from order_detail od
+where od.order_id in (select order_id from potential_problem_orders)
+order by od.order_id, od.product_id
+
+--q40
+-- with bug
+select
+    order_detail.order_id
+    ,product_id
+    ,unit_price
+    ,quantity
+    ,discount
+from order_detail
+    join (
+        select distinct -- solution 1: add distinct to avoid duplication on joining
+            order_id
+        from order_detail
+        where quantity >= 60
+        group by order_id, quantity
+        having count(*) > 1
+    ) potential_problem_orders
+    on potential_problem_orders.order_id = order_detail.order_id
+--group by order_detail.order_id, order_detail.quantity, order_detail.product_id --solution 2: using group by
+order by order_id, product_id
+
+--q41
+select o.order_id, o.order_date, o.required_date, o.shipped_date 
+from "order" o 
+where o.required_date <= o.shipped_date 
+
+--q42
+select e.employee_id, e.last_name, count(*) as "TotalLateOrders"
+from "order" o 
+join employee e 
+	on o.employee_id = e.employee_id 
+where o.required_date <= o.shipped_date 
+group by e.employee_id, e.last_name 
+order by "TotalLateOrders" desc
+
+--q43
+with all_orders_per_employee as (
+    select e.employee_id, count(*) as "AllOrders"
+    from employee e 
+	join "order" o 
+		on o.employee_id = e.employee_id 
+	group by e.employee_id 
+)
+select e.employee_id, e.last_name, count(*) as "TotalLateOrders", aoe."AllOrders" 
+from "order" o 
+join employee e 
+	on o.employee_id = e.employee_id 
+join all_orders_per_employee aoe
+	on o.employee_id = aoe.employee_id 
+where o.required_date <= o.shipped_date 
+group by e.employee_id, e.last_name, aoe."AllOrders"
+order by e.employee_id
+
+--q44
+with all_late_orders_per_employee as (
+    select e.employee_id, count(*) as "LateOrders"
+    from employee e 
+	join "order" o 
+		on o.employee_id = e.employee_id 
+	where o.required_date <= o.shipped_date 
+	group by e.employee_id 
+)
+select e.employee_id, e.last_name, count(*) as "AllOrders", aloe."LateOrders"  
+from "order" o 
+join employee e 
+	on o.employee_id = e.employee_id 
+left join all_late_orders_per_employee aloe
+	on o.employee_id = aloe.employee_id 
+group by e.employee_id, e.last_name, aloe."LateOrders" 
+order by e.employee_id
+
+--q45
+with all_late_orders_per_employee as (
+    select e.employee_id, count(*) as "LateOrders"
+    from employee e 
+	join "order" o 
+		on o.employee_id = e.employee_id 
+	where o.required_date <= o.shipped_date 
+	group by e.employee_id 
+)
+-- coalesce(arg1, arg2, ...) returns the first non-null argument.
+select e.employee_id, e.last_name, count(*) as "AllOrders", coalesce(aloe."LateOrders", 0)  
+from "order" o 
+join employee e 
+	on o.employee_id = e.employee_id 
+left join all_late_orders_per_employee aloe
+	on o.employee_id = aloe.employee_id 
+group by e.employee_id, e.last_name, aloe."LateOrders" 
+order by e.employee_id
