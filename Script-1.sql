@@ -376,7 +376,11 @@ with all_late_orders_per_employee as (
 	group by e.employee_id 
 )
 -- coalesce(arg1, arg2, ...) returns the first non-null argument.
-select e.employee_id, e.last_name, count(*) as "AllOrders", coalesce(aloe."LateOrders", 0)  
+select 
+	e.employee_id, 
+	e.last_name, 
+	count(*) as "AllOrders", 
+	coalesce(aloe."LateOrders", 0)
 from "order" o 
 join employee e 
 	on o.employee_id = e.employee_id 
@@ -384,3 +388,138 @@ left join all_late_orders_per_employee aloe
 	on o.employee_id = aloe.employee_id 
 group by e.employee_id, e.last_name, aloe."LateOrders" 
 order by e.employee_id
+
+--q46
+with all_late_orders_per_employee as (
+    select e.employee_id, count(*) as "LateOrders"
+    from employee e 
+	join "order" o 
+		on o.employee_id = e.employee_id 
+	where o.required_date <= o.shipped_date 
+	group by e.employee_id 
+)
+select 
+	e.employee_id, 
+	e.last_name, 
+	count(*) as "AllOrders", 
+	coalesce(aloe."LateOrders", 0) as "LateOrders",
+	coalesce(aloe."LateOrders", 0)::decimal / count(*) as "PercentLateOrders"
+from "order" o 
+join employee e 
+	on o.employee_id = e.employee_id 
+left join all_late_orders_per_employee aloe
+	on o.employee_id = aloe.employee_id 
+group by e.employee_id, e.last_name, aloe."LateOrders" 
+order by e.employee_id
+
+--q47
+with all_late_orders_per_employee as (
+    select e.employee_id, count(*) as "LateOrders"
+    from employee e 
+	join "order" o 
+		on o.employee_id = e.employee_id 
+	where o.required_date <= o.shipped_date 
+	group by e.employee_id 
+)
+select 
+	e.employee_id, 
+	e.last_name, 
+	count(*) as "AllOrders", 
+	coalesce(aloe."LateOrders", 0) as "LateOrders",
+	round(coalesce(aloe."LateOrders", 0)::decimal / count(*), 2) as "PercentLateOrders"
+from "order" o 
+join employee e 
+	on o.employee_id = e.employee_id 
+left join all_late_orders_per_employee aloe
+	on o.employee_id = aloe.employee_id 
+group by e.employee_id, e.last_name, aloe."LateOrders" 
+order by e.employee_id
+
+--q48, q49
+select 
+	c.customer_id, 
+	c.company_name, 
+	sum(od.quantity * od.unit_price) as "TotalOrderAmount",
+	case 
+	    when sum(od.quantity * od.unit_price) < 1000 then 'Low'
+	    when sum(od.quantity * od.unit_price) < 5000 then 'Medium'
+	    when sum(od.quantity * od.unit_price) < 10000 then 'High'
+	    else 'Very High'
+	end as "CustomerGroup"
+from customer c
+join "order" o on o.customer_id = c.customer_id 
+join order_detail od on o.order_id = od.order_id 
+where extract(year from o.order_date) = 2016
+group by c.customer_id, c.company_name
+order by c.customer_id
+
+--q50
+-- Goal: Show percentage of customers in each group (Low, Medium, High, Very High)
+-- 
+-- Why we need OVER() window function:
+-- Problem: In a GROUP BY query, aggregate functions only see rows within their own group.
+--          count(*) returns count per group, but we need the TOTAL count across ALL groups
+--          to calculate percentage.
+--
+-- Without OVER(): count(*) / sum(count(*)) would fail because sum(count(*)) 
+--                 would just equal count(*) within each group = always 1.
+--
+-- With OVER():    sum(count(*)) over() computes the sum across the ENTIRE result set,
+--                 not just the current group. The empty OVER() means "all rows".
+--
+-- Execution flow:
+-- 1. GROUP BY groups rows by "CustomerGroup"
+-- 2. count(*) computes count within each group (e.g., Low=10, Medium=25, High=20, Very High=26)
+-- 3. sum(count(*)) over() adds up ALL group counts (10+25+20+26 = 81)
+-- 4. Division gives percentage: 10/81, 25/81, 20/81, 26/81
+with grouped_customers as (
+	select 
+		c.customer_id, 
+		c.company_name, 
+		sum(od.quantity * od.unit_price) as "TotalOrderAmount",
+		case 
+		    when sum(od.quantity * od.unit_price) < 1000 then 'Low'
+		    when sum(od.quantity * od.unit_price) < 5000 then 'Medium'
+		    when sum(od.quantity * od.unit_price) < 10000 then 'High'
+		    else 'Very High'
+		end as "CustomerGroup"
+	from customer c
+	join "order" o on o.customer_id = c.customer_id 
+	join order_detail od on o.order_id = od.order_id 
+	where extract(year from o.order_date) = 2016
+	group by c.customer_id, c.company_name
+)
+select 
+	"CustomerGroup", 
+	count(*) as "TotalInGroup", 
+	-- count(*) = customers in THIS group
+	-- sum(count(*)) over() = total customers across ALL groups (window function)
+	count(*)::decimal / sum(count(*)) over() as "PercentageInGroup"
+from grouped_customers
+group by "CustomerGroup"
+order by "TotalInGroup" desc
+
+--q51
+--non-equi JOIN
+with customer_totals as (
+    select 
+        c.customer_id, 
+        c.company_name, 
+        sum(od.quantity * od.unit_price) as "TotalOrderAmount"
+    from customer c
+    join "order" o on o.customer_id = c.customer_id 
+    join order_detail od on o.order_id = od.order_id 
+    where extract(year from o.order_date) = 2016
+    group by c.customer_id, c.company_name
+)
+select 
+    customer_id,
+    company_name,
+    "TotalOrderAmount",
+	cgt.customer_group_name 
+from customer_totals ct
+join customer_group_threshold cgt 
+	on ct."TotalOrderAmount" >= cgt.range_bottom 
+	and ct."TotalOrderAmount" < cgt.range_top 
+order by customer_id
+
