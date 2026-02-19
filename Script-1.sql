@@ -523,3 +523,56 @@ join customer_group_threshold cgt
 	and ct."TotalOrderAmount" < cgt.range_top 
 order by customer_id
 
+--q52
+select c.country 
+from customer c 
+union
+--Use the UNION to combine result sets of two queries and return distinct rows.
+--Use the UNION ALL to combine the result sets of two queries but retain the duplicate rows.
+select s.country 
+from supplier s 
+order by country
+
+--q53
+-- ISSUE: Joining raw tables creates many duplicate rows before DISTINCT eliminates them.
+-- Example: If USA has 10 customers and 3 suppliers, the join produces 10×3 = 30 rows,
+-- then DISTINCT collapses them to 1. This is inefficient.
+-- 
+-- BETTER APPROACH: Get distinct countries from each table FIRST, then join:
+-- select s.country as "SupplierCountry", c.country as "CustomerCountry"
+-- from (select distinct country from supplier) s
+-- full join (select distinct country from customer) c 
+--     on s.country = c.country 
+-- order by coalesce(s.country, c.country)
+
+-- select distinct s.country as "SupplierCountry", c.country as "CustomerCountry"
+-- from customer c 
+-- full join supplier s 
+-- 	on c.country = s.country 
+-- order by "SupplierCountry", "CustomerCountry"
+
+select s.country as "SupplierCountry", c.country as "CustomerCountry"
+from (select distinct country from supplier) s
+full join (select distinct country from customer) c 
+		on s.country = c.country
+order by coalesce(s.country, c.country)
+-- NOTE: COALESCE in ORDER BY would ensure proper alphabetical sorting 
+-- regardless of which column has NULL 
+
+--q54
+with all_countries as (
+	select country from customer c 
+	union
+	select country from supplier s 
+)
+select
+	ac.country,
+	count(distinct s.supplier_id) as "TotalSuppliers",
+    count(distinct c.customer_id) as "TotalCustomers"
+from all_countries ac
+left join supplier s on s.country = ac.country 
+left join customer c on c.country = ac.country 
+group by ac.country
+order by ac.country 
+
+
