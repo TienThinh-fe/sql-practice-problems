@@ -575,4 +575,202 @@ left join customer c on c.country = ac.country
 group by ac.country
 order by ac.country 
 
+--q55
+-- ROW_NUMBER() window function:
+-- Assigns sequential integers (1, 2, 3...) to rows within each partition.
+-- PARTITION BY: Divides rows into groups (here: by ship_country)
+-- ORDER BY: Determines the numbering order within each partition (here: by order_date)
+-- Result: Each country's orders are numbered 1, 2, 3... by date
+-- WHERE rank = 1: Gets the first (earliest) order per country
+with summary as (
+	select 
+		o.ship_country, 
+		o.customer_id, 
+		o.order_id, 
+		o.order_date,
+		row_number() over(partition by o.ship_country order by o.order_date) as rank
+	from "order" o 
+	order by o.ship_country, o.order_date, o.order_id 
+) 
+select s.ship_country, s.customer_id, s.order_id, s.order_date 
+from summary s
+where "rank" = 1
 
+
+--q56
+-- GOAL: Find customers who made more than 1 order within 5 days
+-- This helps sales team identify customers who could batch orders to save freight costs
+
+-- =============================================================================
+-- STEP 1: Start simple - look at orders for ONE customer
+-- =============================================================================
+-- Pick a customer (e.g., 'ANTO') and see their orders
+-- Columns: customer_id, order_id, order_date
+-- Filter: WHERE customer_id = 'ANTO'
+-- Sort by: order_date
+
+select o.customer_id, o.order_id, o.order_date 
+from "order" o 
+where o.customer_id = 'ANTO'
+order by o.order_date 
+
+
+-- =============================================================================
+-- STEP 2: Self-join to COMPARE two orders from the same customer
+-- =============================================================================
+-- A SELF-JOIN joins a table to itself using two aliases (o1, o2)
+-- Structure:
+--     FROM "order" o1          -- first copy (the "initial" order)
+--     JOIN "order" o2          -- second copy (the "next" order)  
+--       ON o1.customer_id = o2.customer_id   -- match by same customer
+--
+-- Try for ANTO: SELECT columns from both o1 and o2
+-- Notice: You'll see duplicates like (A,B) and (B,A), plus self-matches
+
+select 
+	o.customer_id, 
+	o.order_id as "InitialOrderID", 
+	to_char(o.order_date, 'YYYY-MM-DD') as "InitialOrderDate",
+	o2.order_id as "NextOrderID",
+	to_char(o2.order_date, 'YYYY-MM-DD') as "NextOrderDate"
+from "order" o 
+join "order" o2
+	on o.customer_id = o2.customer_id 
+where o.customer_id = 'ANTO'
+order by o.order_date 
+
+
+-- =============================================================================
+-- STEP 3: Remove unwanted pairs
+-- =============================================================================
+-- Problem: duplicates (A,B) and (B,A) + self-matches (A,A)
+-- Solution: Add WHERE o2.order_date > o1.order_date
+--           This ensures second order comes AFTER first (removes both issues)
+select 
+	o.customer_id, 
+	o.order_id as "InitialOrderID", 
+	to_char(o.order_date, 'YYYY-MM-DD') as "InitialOrderDate",
+	o2.order_id as "NextOrderID",
+	to_char(o2.order_date, 'YYYY-MM-DD') as "NextOrderDate"
+from "order" o 
+join "order" o2
+	on o.customer_id = o2.customer_id 
+where 
+	o.customer_id = 'ANTO' and
+	o2.order_date > o.order_date 
+order by o.order_date 
+
+
+-- =============================================================================
+-- STEP 4: Calculate days between and filter to 5 days
+-- =============================================================================
+-- PostgreSQL: (date2 - date1) returns integer days
+-- Add to SELECT: (o2.order_date - o1.order_date) as days_between
+-- Add to WHERE: (o2.order_date - o1.order_date) <= 5
+
+select 
+	o.customer_id, 
+	o.order_id as "InitialOrderID", 
+	to_char(o.order_date, 'YYYY-MM-DD') as "InitialOrderDate",
+	o2.order_id as "NextOrderID",
+	to_char(o2.order_date, 'YYYY-MM-DD') as "NextOrderDate",
+	(o2.order_date::date - o.order_date::date) as "DaysBetween"
+from "order" o 
+join "order" o2
+	on o.customer_id = o2.customer_id 
+where 
+--	o2.order_date > o.order_date and
+--  issue: if compare by date => missing same date orders
+--  fix: compare id because id is sequential
+	o.order_id < o2.order_id and
+	(o2.order_date::date - o.order_date::date) <= 5
+order by o.customer_id, o.order_date
+
+
+--q57
+-- GOAL: Same as q56 (orders within 5 days) but using WINDOW FUNCTIONS instead of self-join
+-- This approach uses LEAD() to look at the "next" order for each customer
+
+-- =============================================================================
+-- WHY 69 ROWS vs 71 ROWS? (Important!)
+-- =============================================================================
+-- Self-join (q56): Pairs EVERY order with EVERY other order within 5 days
+-- Window LEAD:     Pairs each order with ONLY the IMMEDIATE NEXT order
+--
+-- Example: Customer ERNSH has orders on Jan 13, Jan 15, Jan 19 (all within 6 days)
+--
+--   Self-join finds:
+--     (Jan 13 → Jan 15) = 2 days ✓
+--     (Jan 13 → Jan 19) = 6 days ✗ (> 5 days)
+--     (Jan 15 → Jan 19) = 4 days ✓
+--     Total: 2 pairs
+--
+--   Window LEAD finds:
+--     Jan 13 → next is Jan 15 = 2 days ✓
+--     Jan 15 → next is Jan 19 = 4 days ✓
+--     Total: 2 pairs (same in this case)
+--
+-- But if orders are: Jan 10, Jan 12, Jan 14 (all within 5 days of each other)
+--   Self-join: (Jan 10→12), (Jan 10→14), (Jan 12→14) = 3 pairs
+--   LEAD:      (Jan 10→12), (Jan 12→14) = 2 pairs (misses Jan 10→14)
+--
+-- LEAD only sees CONSECUTIVE orders, not all combinations!
+
+-- =============================================================================
+-- STEP 1: Understand LEAD() window function
+-- =============================================================================
+-- LEAD(column, n) looks ahead n rows and returns that value
+-- LEAD(order_date, 1) = get the NEXT row's order_date
+-- Must use with OVER(PARTITION BY ... ORDER BY ...)
+--
+-- Syntax:
+--   LEAD(order_date, 1) OVER (PARTITION BY customer_id ORDER BY order_date)
+--   ↑ look ahead 1 row    ↑ within each customer, ordered by date
+
+
+-- =============================================================================
+-- STEP 2: Create a CTE that adds "NextOrderDate" column
+-- =============================================================================
+-- Use WITH to create a CTE named something like "order_with_next"
+-- SELECT: customer_id, order_id, order_date, and LEAD() as next_order_date
+-- PARTITION BY: customer_id (so LEAD looks within same customer)
+-- ORDER BY: order_date (so "next" means chronologically next)
+
+with order_with_next as (
+	select 
+		o.customer_id,
+		to_char(o.order_date, 'YYYY-MM-DD') as "OrderDate",
+		to_char(lead(o.order_date, 1) over (partition by o.customer_id order by o.order_date), 'YYYY-MM-DD') as "NextOrderDate"
+	from "order" o 
+)
+
+
+-- =============================================================================
+-- STEP 3: Query the CTE and calculate days between
+-- =============================================================================
+-- SELECT from your CTE
+-- Calculate: (next_order_date - order_date) as days_between
+-- Filter WHERE days_between <= 5
+-- Note: LEAD returns NULL for the last order (no next order), so those rows
+--       will be excluded automatically when you filter
+
+with order_with_next as (
+	select 
+		o.customer_id,
+		to_char(o.order_date, 'YYYY-MM-DD') as "OrderDate",
+		to_char(lead(o.order_date, 1) over (partition by o.customer_id order by o.order_date), 'YYYY-MM-DD') as "NextOrderDate"
+	from "order" o 
+)
+select
+	own.customer_id,
+	own."OrderDate" ,
+	own."NextOrderDate",
+	(own."NextOrderDate"::date - own."OrderDate"::date) as "DaysBetween"
+from order_with_next own
+where (own."NextOrderDate"::date - own."OrderDate"::date) <= 5
+
+-- =============================================================================
+-- STEP 4: Compare results with q56
+-- =============================================================================
+-- Run both q56 and q57, notice the row count difference
+-- To investigate: query ERNSH's orders and trace through both approaches
